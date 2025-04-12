@@ -1,69 +1,101 @@
-import os, json
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 import requests
 import numpy as np
 from sentence_transformers import util
+import os
+import json
 
 app = FastAPI()
+
+# 🔗 Colabで立てた埋め込みAPI（最新ngrok URLに更新！）
 COLAB_EMBED_URL = "https://c64d-35-233-132-179.ngrok-free.app"
 
-ADS_FILE = "ad_vectors.json"
-
-ads = [
-    {"title": "キャンプ用品セール", "message": "自然の中で過ごすのが好きな人に向けたアウトドア用品のセールです", "area": "全国"},
-    {"title": "ネコカフェ渋谷店", "message": "猫と静かに過ごしたい人のための癒やし空間です", "area": "東京都渋谷区"},
-    {"title": "渋谷バー巡りガイド", "message": "ナイトライフを楽しみたい人向けのバー特集", "area": "東京都渋谷区"}
+# 🍽 レシピデータ（タイトル・説明・カテゴリ）
+recipes = [
+    {
+        "title": "鶏むね肉の香草グリル",
+        "description": "ヘルシー志向で高タンパクな食事を求める人におすすめのシンプルグリル料理です。",
+        "category": "ヘルシー"
+    },
+    {
+        "title": "スパイシー豆カレー",
+        "description": "ベジタリアンやスパイス好きな人にぴったりの栄養満点レシピです。",
+        "category": "ベジタリアン"
+    },
+    {
+        "title": "たっぷり野菜のミネストローネ",
+        "description": "野菜不足を感じている人や体を温めたい日におすすめのスープです。",
+        "category": "野菜"
+    },
+    {
+        "title": "10分でできる和風パスタ",
+        "description": "忙しいけどしっかり食べたい人に向けた、時短＆満足感のあるレシピです。",
+        "category": "時短"
+    },
+    {
+        "title": "濃厚チョコレートブラウニー",
+        "description": "甘いものが好きで、自分へのご褒美が欲しい日にぴったりなスイーツです。",
+        "category": "スイーツ"
+    }
 ]
 
-# 🔄 キャッシュの読み込み
-if os.path.exists(ADS_FILE):
-    with open(ADS_FILE, "r") as f:
-        ad_cache = json.load(f)
+# 💾 ベクトルキャッシュファイル
+CACHE_FILE = "recipe_vectors.json"
+if os.path.exists(CACHE_FILE):
+    with open(CACHE_FILE, "r") as f:
+        recipe_cache = json.load(f)
 else:
-    ad_cache = {}
+    recipe_cache = {}
 
 def save_cache():
-    with open(ADS_FILE, "w") as f:
-        json.dump(ad_cache, f)
+    with open(CACHE_FILE, "w") as f:
+        json.dump(recipe_cache, f)
 
+# 🔁 ベクトル取得（Colab + キャッシュ + 安定化）
 def get_embedding(text: str, cache_key: str = None):
-    if cache_key and cache_key in ad_cache:
-        return np.array(ad_cache[cache_key])
-    
-    # Colabに投げる
-    res = requests.post(COLAB_EMBED_URL, json={"text": text})
-    if res.status_code != 200:
-        raise HTTPException(status_code=500, detail="Embedding fetch failed")
-    
-    vec = res.json()["embedding"]
+    if cache_key and cache_key in recipe_cache:
+        return np.array(recipe_cache[cache_key])
+
+    try:
+        res = requests.post(COLAB_EMBED_URL, json={"text": text}, timeout=10)
+        res.raise_for_status()  # ステータスエラー検出
+        data = res.json()       # JSONDecodeError対策
+        vec = data["embedding"]
+    except requests.exceptions.RequestException as e:
+        raise HTTPException(status_code=500, detail=f"Colab request failed: {e}")
+    except json.JSONDecodeError:
+        raise HTTPException(status_code=500, detail="Colab returned invalid JSON")
+    except KeyError:
+        raise HTTPException(status_code=500, detail="Missing 'embedding' in response")
+
     if cache_key:
-        ad_cache[cache_key] = vec
+        recipe_cache[cache_key] = vec
         save_cache()
+
     return np.array(vec)
 
+# 📬 ユーザー入力
 class MatchRequest(BaseModel):
-    location: str
-    intent: str
-    profile: str
-    top_k: int = 3
+    intent: str  # 今どんなものが食べたいか
+    profile: str  # 食の好み・傾向
+    top_k: int = 3  # 何件返すか
 
 @app.post("/match")
-def match_ads(req: MatchRequest):
-    user_vec = get_embedding(f"{req.intent}。{req.profile}")
+def match_recipes(req: MatchRequest):
+    user_text = f"{req.intent}。{req.profile}"
+    user_vec = get_embedding(user_text)
 
     results = []
-    for ad in ads:
-        ad_vec = get_embedding(ad["message"], cache_key=ad["title"])
-        similarity = util.cos_sim(user_vec, ad_vec).item()
-        area_bonus = 0.15 if req.location in ad["area"] else 0.0
-        total_score = similarity + area_bonus
-
+    for recipe in recipes:
+        recipe_vec = get_embedding(recipe["description"], cache_key=recipe["title"])
+        similarity = util.cos_sim(user_vec, recipe_vec).item()
         results.append({
-            "title": ad["title"],
-            "score": round(total_score, 3),
-            "semantic_score": round(similarity, 3),
-            "area_bonus": area_bonus
+            "title": recipe["title"],
+            "description": recipe["description"],
+            "category": recipe["category"],
+            "score": round(similarity, 3)
         })
 
-    return {"matches": sorted(results, key=lambda x: x["score"], reverse=True)[:req.top_k]}
+    sorted_results = sorted(results, key=lambda x: x["score"], reverse=True)[:req.top_k]
+    return {"matches": sorted_results}
