@@ -1,4 +1,5 @@
-sentence-transformers
-torch
 fastapi
 uvicorn
+sentence-transformers
+torch
+numpy

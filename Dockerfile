@@ -1,22 +1,22 @@
 FROM python:3.10-slim
 
-# システムの更新と必要なパッケージのインストール
+# システム依存パッケージのインストール
 RUN apt-get update && apt-get install -y \
-    git \
     build-essential \
-    cmake \
     && rm -rf /var/lib/apt/lists/*
 
-# 作業ディレクトリ作成
+# 作業ディレクトリ
 WORKDIR /app
 
-# 依存関係のインストール
+# Python依存パッケージのインストール
 COPY requirements.txt .
-RUN pip install --upgrade pip \
-    && pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt
 
-# アプリ本体をコピー
+# アプリ本体コピー
 COPY . .
 
-# 実行
-CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8000"]
+# Cloud Run用ポート指定
+ENV PORT=8080
+
+# 起動コマンド（Cloud Runは 0.0.0.0:8080 を使う）
+CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8080"]
