@@ -9,7 +9,7 @@ import json
 app = FastAPI()
 
 # 🔗 Colabで立てた埋め込みAPI（最新ngrok URLに更新！）
-COLAB_EMBED_URL = "https://c64d-35-233-132-179.ngrok-free.app"
+COLAB_EMBED_URL = "https://ac33-34-125-139-229.ngrok-free.app"
 
 # 🍽 レシピデータ（タイトル・説明・カテゴリ）
 recipes = [
